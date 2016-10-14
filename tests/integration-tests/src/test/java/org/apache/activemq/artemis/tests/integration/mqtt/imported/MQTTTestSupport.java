@@ -17,10 +17,8 @@
 
 package org.apache.activemq.artemis.tests.integration.mqtt.imported;
 
-import javax.net.ssl.KeyManager;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
+import static java.util.Collections.singletonList;
+
 import java.io.File;
 import java.io.IOException;
 import java.security.ProtectionDomain;
@@ -32,7 +30,11 @@ import java.util.LinkedList;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-import io.netty.handler.codec.mqtt.MqttMessage;
+import javax.net.ssl.KeyManager;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+
 import org.apache.activemq.artemis.api.core.ActiveMQException;
 import org.apache.activemq.artemis.api.core.TransportConfiguration;
 import org.apache.activemq.artemis.core.config.Configuration;
@@ -53,11 +55,11 @@ import org.junit.rules.TestName;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static java.util.Collections.singletonList;
+import io.netty.handler.codec.mqtt.MqttMessage;
 
 public class MQTTTestSupport extends ActiveMQTestBase {
 
-   private ActiveMQServer server;
+   protected ActiveMQServer server;
 
    private static final Logger LOG = LoggerFactory.getLogger(MQTTTestSupport.class);
 
@@ -124,29 +126,35 @@ public class MQTTTestSupport extends ActiveMQTestBase {
       // TODO Add SSL
       super.setUp();
       server = createServerForMQTT();
-      addCoreConnector();
-      addMQTTConnector();
+      addCoreConnector(null);
+      addMQTTConnector(null);
       AddressSettings addressSettings = new AddressSettings();
       addressSettings.setMaxSizeBytes(999999999);
       addressSettings.setAutoCreateJmsQueues(true);
 
       server.getAddressSettingsRepository().addMatch("#", addressSettings);
-      server.start();
-      server.waitForActivation(10, TimeUnit.SECONDS);
+      if (isStartServer()) {
+         server.start();
+         server.waitForActivation(10, TimeUnit.SECONDS);
+      }
    }
 
-   private ActiveMQServer createServerForMQTT() throws Exception {
+   protected boolean isStartServer() {
+      return true;
+   }
+
+   protected ActiveMQServer createServerForMQTT() throws Exception {
       Configuration defaultConfig = createDefaultConfig(true).setIncomingInterceptorClassNames(singletonList(MQTTIncomingInterceptor.class.getName())).setOutgoingInterceptorClassNames(singletonList(MQTTOutoingInterceptor.class.getName()));
       return createServer(true, defaultConfig);
    }
 
-   protected void addCoreConnector() throws Exception {
+   protected void addCoreConnector(Integer port) throws Exception {
       // Overrides of this method can add additional configuration options or add multiple
       // MQTT transport connectors as needed, the port variable is always supposed to be
       // assigned the primary MQTT connector's port.
 
       Map<String, Object> params = new HashMap<>();
-      params.put(TransportConstants.PORT_PROP_NAME, "" + 5445);
+      params.put(TransportConstants.PORT_PROP_NAME, "" + (port == null ? 5445 : port));
       params.put(TransportConstants.PROTOCOLS_PROP_NAME, "CORE");
       TransportConfiguration transportConfiguration = new TransportConfiguration(NETTY_ACCEPTOR_FACTORY, params);
       server.getConfiguration().getAcceptorConfigurations().add(transportConfiguration);
@@ -154,13 +162,13 @@ public class MQTTTestSupport extends ActiveMQTestBase {
       LOG.info("Added connector {} to broker", getProtocolScheme());
    }
 
-   protected void addMQTTConnector() throws Exception {
+   protected void addMQTTConnector(Integer mqttPort) throws Exception {
       // Overrides of this method can add additional configuration options or add multiple
       // MQTT transport connectors as needed, the port variable is always supposed to be
       // assigned the primary MQTT connector's port.
 
       Map<String, Object> params = new HashMap<>();
-      params.put(TransportConstants.PORT_PROP_NAME, "" + port);
+      params.put(TransportConstants.PORT_PROP_NAME, "" + (mqttPort == null ? port : mqttPort));
       params.put(TransportConstants.PROTOCOLS_PROP_NAME, "MQTT");
       TransportConfiguration transportConfiguration = new TransportConfiguration(NETTY_ACCEPTOR_FACTORY, params);
       server.getConfiguration().getAcceptorConfigurations().add(transportConfiguration);

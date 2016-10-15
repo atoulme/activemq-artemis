@@ -76,7 +76,8 @@ under the License.
             <connector-ref>netty-connector</connector-ref>
             <retry-interval>500</retry-interval>
             <use-duplicate-detection>true</use-duplicate-detection>
-            <message-load-balancing>ON_DEMAND</message-load-balancing>
+            <forward-when-no-consumers>true</forward-when-no-consumers>
+            <message-load-balancing>STRICT</message-load-balancing>
             <max-hops>1</max-hops>
             <discovery-group-ref discovery-group-name="my-discovery-group"/>
          </cluster-connection>
@@ -95,6 +96,14 @@ under the License.
             <permission type="send" roles="guest"/>
          </security-setting>
       </security-settings>
-
+<address-settings>
+         <!--default for catch all-->
+         <address-setting match="#">
+            <redelivery-delay>0</redelivery-delay>
+            <max-size-bytes>10485760</max-size-bytes>
+            <message-counter-history-day-limit>10</message-counter-history-day-limit>
+            <address-full-policy>BLOCK</address-full-policy>
+         </address-setting>
+      </address-settings>
    </core>
 </configuration>

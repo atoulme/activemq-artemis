@@ -16,19 +16,13 @@
  */
 package org.apache.activemq.artemis.jms.example;
 
-import javax.jms.Connection;
-import javax.jms.ConnectionFactory;
-import javax.jms.MessageConsumer;
-import javax.jms.MessageProducer;
-import javax.jms.Queue;
-import javax.jms.Session;
-import javax.jms.TextMessage;
-import javax.jms.Topic;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.activemq.artemis.api.core.DiscoveryGroupConfiguration;
 import org.apache.activemq.artemis.api.core.UDPBroadcastEndpointFactory;
-import org.apache.activemq.artemis.api.jms.ActiveMQJMSClient;
-import org.apache.activemq.artemis.api.jms.JMSFactoryType;
+import org.apache.activemq.artemis.tests.integration.mqtt.imported.FuseMQTTClientProvider;
+import org.apache.activemq.artemis.tests.integration.mqtt.imported.MQTTClientProvider;
 
 /**
  * This example demonstrates a cluster of three nodes set up in a symmetric topology - i.e. each
@@ -49,18 +43,9 @@ import org.apache.activemq.artemis.api.jms.JMSFactoryType;
  */
 public class SymmetricClusterExample {
 
+   private static final int NUM_MESSAGES = 10;
+
    public static void main(final String[] args) throws Exception {
-      Connection connection0 = null;
-
-      Connection connection1 = null;
-
-      Connection connection2 = null;
-
-      Connection connection3 = null;
-
-      Connection connection4 = null;
-
-      Connection connection5 = null;
 
       try {
          // Step 1 - We instantiate a connection factory directly, specifying the UDP address and port for discovering
@@ -76,146 +61,63 @@ public class SymmetricClusterExample {
          DiscoveryGroupConfiguration groupConfiguration = new DiscoveryGroupConfiguration();
          groupConfiguration.setBroadcastEndpointFactory(udpCfg);
 
-         ConnectionFactory cf = ActiveMQJMSClient.createConnectionFactoryWithHA(groupConfiguration, JMSFactoryType.CF);
-
          // We give a little while for each server to broadcast its whereabouts to the client
          Thread.sleep(2000);
 
-         // Step 2. Directly instantiate JMS Queue and Topic objects
-         Queue queue = ActiveMQJMSClient.createQueue("exampleQueue");
+         // MQTT now.
+         final MQTTClientProvider subscriptionProvider = getMQTTClientProvider();
+         subscriptionProvider.connect("tcp://localhost:" + 1885);
 
-         Topic topic = ActiveMQJMSClient.createTopic("exampleTopic");
+         subscriptionProvider.subscribe("mqtt/#", 0);
 
-         // Step 3. We create six connections, they should be to different nodes of the cluster in a round-robin fashion
-         // and start them
-         connection0 = cf.createConnection();
+         final CountDownLatch latch = new CountDownLatch(NUM_MESSAGES * 2);
 
-         connection1 = cf.createConnection();
+         Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+               for (int i = 0; i < NUM_MESSAGES; i++) {
+                  try {
+                     byte[] payload = subscriptionProvider.receive(10000);
+                     if (payload == null) {
+                        throw new Exception("Nothing received after 10s");
+                     }
+                     System.err.println("Received message on pattern subscription " + i + ":" + new String(payload));
+                     latch.countDown();
+                  } catch (Exception e) {
+                     e.printStackTrace();
+                     break;
+                  }
+               }
+            }
+         });
+         thread.start();
 
-         connection2 = cf.createConnection();
+         final MQTTClientProvider publishProvider = getMQTTClientProvider();
+         publishProvider.connect("tcp://localhost:" + 1883);
+         // final MQTTClientProvider publishProvider2 = getMQTTClientProvider();
+         // publishProvider2.connect("tcp://localhost:" + 1887);
 
-         connection3 = cf.createConnection();
-
-         connection4 = cf.createConnection();
-
-         connection5 = cf.createConnection();
-
-         connection0.start();
-
-         connection1.start();
-
-         connection2.start();
-
-         connection3.start();
-
-         connection4.start();
-
-         connection5.start();
-
-         // Step 4. We create a session on each connection
-
-         Session session0 = connection0.createSession(false, Session.AUTO_ACKNOWLEDGE);
-
-         Session session1 = connection1.createSession(false, Session.AUTO_ACKNOWLEDGE);
-
-         Session session2 = connection2.createSession(false, Session.AUTO_ACKNOWLEDGE);
-
-         Session session3 = connection0.createSession(false, Session.AUTO_ACKNOWLEDGE);
-
-         Session session4 = connection1.createSession(false, Session.AUTO_ACKNOWLEDGE);
-
-         Session session5 = connection2.createSession(false, Session.AUTO_ACKNOWLEDGE);
-
-         // Step 5. We create a topic subscriber on each server
-
-         MessageConsumer subscriber0 = session0.createConsumer(topic);
-
-         MessageConsumer subscriber1 = session1.createConsumer(topic);
-
-         MessageConsumer subscriber2 = session2.createConsumer(topic);
-
-         MessageConsumer subscriber3 = session3.createConsumer(topic);
-
-         MessageConsumer subscriber4 = session4.createConsumer(topic);
-
-         MessageConsumer subscriber5 = session5.createConsumer(topic);
-
-         // Step 6. We create a queue consumer on server 0
-
-         MessageConsumer consumer0 = session0.createConsumer(queue);
-
-         // Step 7. We create an anonymous message producer on just one server 2
-
-         MessageProducer producer2 = session2.createProducer(null);
-
-         // Step 8. We send 500 messages each to the queue and topic
-
-         final int numMessages = 500;
-
-         for (int i = 0; i < numMessages; i++) {
-            TextMessage message1 = session2.createTextMessage("Topic message " + i);
-
-            producer2.send(topic, message1);
-
-            TextMessage message2 = session2.createTextMessage("Queue message " + i);
-
-            producer2.send(queue, message2);
+         for (int i = 0; i < NUM_MESSAGES; i++) {
+            String payload = "Message " + i;
+            System.err.println("Sending " + payload);
+            publishProvider.publish("mqtt/bar" + i, payload.getBytes(), 0);
+            // System.err.println("Sending again " + payload);
+            // publishProvider2.publish("mqtt/bar" + i, payload.getBytes(), 1);
          }
 
-         // Step 9. Verify all subscribers and the consumer receive the messages
+         latch.await(10, TimeUnit.SECONDS);
+         subscriptionProvider.disconnect();
+         publishProvider.disconnect();
+         // publishProvider2.disconnect();
+         System.err.println("==== Messages remaining: " + latch.getCount() + " ====");
 
-         for (int i = 0; i < numMessages; i++) {
-            TextMessage received0 = (TextMessage) subscriber0.receive(5000);
-
-            if (received0 == null) {
-               throw new IllegalStateException("Message is null!");
-            }
-
-            TextMessage received1 = (TextMessage) subscriber1.receive(5000);
-
-            if (received1 == null) {
-               throw new IllegalStateException("Message is null!");
-            }
-
-            TextMessage received2 = (TextMessage) subscriber2.receive(5000);
-
-            if (received2 == null) {
-               throw new IllegalStateException("Message is null!");
-            }
-
-            TextMessage received3 = (TextMessage) subscriber3.receive(5000);
-
-            if (received3 == null) {
-               throw new IllegalStateException("Message is null!");
-            }
-
-            TextMessage received4 = (TextMessage) subscriber4.receive(5000);
-
-            if (received4 == null) {
-               throw new IllegalStateException("Message is null!");
-            }
-
-            TextMessage received5 = (TextMessage) subscriber5.receive(5000);
-
-            if (received5 == null) {
-               throw new IllegalStateException("Message is null!");
-            }
-
-            TextMessage received6 = (TextMessage) consumer0.receive(5000);
-
-            if (received6 == null) {
-               throw new IllegalStateException("Message is null!");
-            }
-         }
+      } catch(Exception e) {
+         e.printStackTrace();
       } finally {
-         // Step 15. Be sure to close our resources!
-
-         connection0.close();
-         connection1.close();
-         connection2.close();
-         connection3.close();
-         connection4.close();
-         connection5.close();
       }
+   }
+
+   public static MQTTClientProvider getMQTTClientProvider() {
+      return new FuseMQTTClientProvider();
    }
 }

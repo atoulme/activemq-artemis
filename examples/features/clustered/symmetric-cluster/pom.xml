@@ -35,12 +35,42 @@ under the License.
       <activemq.basedir>${project.basedir}/../../../..</activemq.basedir>
    </properties>
 
+   
+   <repositories>
+       <!-- for the paho dependency -->
+       <repository>
+           <id>eclipse.m2</id>
+           <url>https://repo.eclipse.org/content/repositories/paho-releases/</url>
+           <releases><enabled>true</enabled></releases>
+           <snapshots><enabled>false</enabled></snapshots>
+       </repository>
+   </repositories>
+
    <dependencies>
       <dependency>
          <groupId>org.apache.activemq</groupId>
          <artifactId>artemis-jms-client</artifactId>
          <version>${project.version}</version>
       </dependency>
+            <!-- MQTT Deps -->
+      <dependency>
+         <groupId>org.apache.activemq</groupId>
+         <artifactId>artemis-mqtt-protocol</artifactId>
+         <version>${project.version}</version>
+      </dependency>
+      <dependency>
+         <groupId>org.fusesource.mqtt-client</groupId>
+         <artifactId>mqtt-client</artifactId>
+      </dependency>
+      <dependency>
+          <groupId>org.eclipse.paho</groupId>
+          <artifactId>mqtt-client</artifactId>
+      </dependency>
+      <dependency>
+         <groupId>io.netty</groupId>
+         <artifactId>netty-all</artifactId>
+      </dependency>
+      <!-- END MQTT Deps -->
    </dependencies>
 
    <build>

@@ -46,6 +46,9 @@ under the License.
       <!-- Acceptors -->
       <acceptors>
          <acceptor name="netty-acceptor">tcp://localhost:61620</acceptor>
+         
+         <!-- MQTT Acceptor -->
+         <acceptor name="mqtt">tcp://0.0.0.0:1887?protocols=MQTT</acceptor>
       </acceptors>
 
       <!-- Clustering configuration -->
@@ -68,7 +71,7 @@ under the License.
 
       <cluster-connections>
          <cluster-connection name="my-cluster">
-            <address>jms</address>
+            <address>jms,mqtt</address>
             <connector-ref>netty-connector</connector-ref>
             <retry-interval>500</retry-interval>
             <use-duplicate-detection>true</use-duplicate-detection>
@@ -82,7 +85,7 @@ under the License.
 
       <security-settings>
          <!-- Default JMS security -->
-         <security-setting match="jms.#">
+         <security-setting match="#">
             <permission type="createDurableQueue" roles="guest"/>
             <permission type="deleteDurableQueue" roles="guest"/>
             <permission type="createNonDurableQueue" roles="guest"/>

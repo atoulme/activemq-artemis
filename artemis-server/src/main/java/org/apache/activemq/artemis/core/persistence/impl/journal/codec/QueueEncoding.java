@@ -18,6 +18,7 @@ package org.apache.activemq.artemis.core.persistence.impl.journal.codec;
 
 import org.apache.activemq.artemis.api.core.ActiveMQBuffer;
 import org.apache.activemq.artemis.core.journal.EncodingSupport;
+import org.apache.activemq.artemis.utils.DataConstants;
 
 public class QueueEncoding implements EncodingSupport {
 
@@ -44,7 +45,7 @@ public class QueueEncoding implements EncodingSupport {
 
    @Override
    public int getEncodeSize() {
-      return 8;
+      return DataConstants.SIZE_LONG;
    }
 
    @Override

@@ -41,6 +41,8 @@ public class ServiceRegistryImpl implements ServiceRegistry {
 
    private ExecutorService executorService;
 
+   private ExecutorService ioExecutorService;
+
    private ScheduledExecutorService scheduledExecutorService;
 
    /* We are using a List rather than HashMap here as ActiveMQ Artemis allows multiple instances of the same class to be added
@@ -103,18 +105,18 @@ public class ServiceRegistryImpl implements ServiceRegistry {
       if (configs != null) {
          for (final ConnectorServiceConfiguration config : configs) {
             if (connectorServices.get(config.getConnectorName()) == null) {
-               ConnectorServiceFactory factory = AccessController.doPrivileged(new PrivilegedAction<ConnectorServiceFactory>() {
-                  @Override
-                  public ConnectorServiceFactory run() {
-                     return (ConnectorServiceFactory) ClassloadingUtil.newInstanceFromClassLoader(config.getFactoryClassName());
-                  }
-               });
+               ConnectorServiceFactory factory = loadClass(config.getFactoryClassName());
                addConnectorService(factory, config);
             }
          }
       }
 
       return connectorServices.values();
+   }
+
+   @Override
+   public ConnectorServiceFactory getConnectorService(ConnectorServiceConfiguration configuration) {
+      return loadClass(configuration.getFactoryClassName());
    }
 
    @Override
@@ -163,6 +165,16 @@ public class ServiceRegistryImpl implements ServiceRegistry {
    }
 
    @Override
+   public ExecutorService getIOExecutorService() {
+      return ioExecutorService;
+   }
+
+   @Override
+   public void setIOExecutorService(ExecutorService ioExecutorService) {
+      this.ioExecutorService = ioExecutorService;
+   }
+
+   @Override
    public void addBridgeTransformer(String name, Transformer transformer) {
       bridgeTransformers.put(name, transformer);
    }
@@ -184,13 +196,7 @@ public class ServiceRegistryImpl implements ServiceRegistry {
       AcceptorFactory factory = acceptorFactories.get(name);
 
       if (factory == null && className != null) {
-         factory = AccessController.doPrivileged(new PrivilegedAction<AcceptorFactory>() {
-            @Override
-            public AcceptorFactory run() {
-               return (AcceptorFactory) ClassloadingUtil.newInstanceFromClassLoader(className);
-            }
-         });
-
+         factory = loadClass(className);
          addAcceptorFactory(name, factory);
       }
 
@@ -202,17 +208,22 @@ public class ServiceRegistryImpl implements ServiceRegistry {
       acceptorFactories.put(name, acceptorFactory);
    }
 
+   @SuppressWarnings("TypeParameterUnusedInFormals")
+   public <T> T loadClass(final String className) {
+      return AccessController.doPrivileged(new PrivilegedAction<T>() {
+         @Override
+         public T run() {
+            return (T) ClassloadingUtil.newInstanceFromClassLoader(className);
+         }
+      });
+   }
+
    private Transformer instantiateTransformer(final String className) {
       Transformer transformer = null;
 
       if (className != null) {
          try {
-            transformer = AccessController.doPrivileged(new PrivilegedAction<Transformer>() {
-               @Override
-               public Transformer run() {
-                  return (Transformer) ClassloadingUtil.newInstanceFromClassLoader(className);
-               }
-            });
+            transformer = loadClass(className);
          } catch (Exception e) {
             throw ActiveMQMessageBundle.BUNDLE.errorCreatingTransformerClass(e, className);
          }
@@ -223,13 +234,7 @@ public class ServiceRegistryImpl implements ServiceRegistry {
    private void instantiateInterceptors(List<String> classNames, List<BaseInterceptor> interceptors) {
       if (classNames != null) {
          for (final String className : classNames) {
-            BaseInterceptor interceptor = AccessController.doPrivileged(new PrivilegedAction<BaseInterceptor>() {
-               @Override
-               public BaseInterceptor run() {
-                  return (BaseInterceptor) ClassloadingUtil.newInstanceFromClassLoader(className);
-               }
-            });
-
+            BaseInterceptor interceptor = loadClass(className);
             interceptors.add(interceptor);
          }
       }

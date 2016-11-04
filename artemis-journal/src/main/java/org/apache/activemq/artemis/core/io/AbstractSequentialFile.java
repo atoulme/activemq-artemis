@@ -19,10 +19,9 @@ package org.apache.activemq.artemis.core.io;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedChannelException;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.activemq.artemis.api.core.ActiveMQBuffer;
@@ -58,11 +57,6 @@ public abstract class AbstractSequentialFile implements SequentialFile {
    protected final TimedBufferObserver timedBufferObserver = new LocalBufferObserver();
 
    /**
-    * Used for asynchronous writes
-    */
-   protected final Executor writerExecutor;
-
-   /**
     * @param file
     * @param directory
     */
@@ -74,7 +68,6 @@ public abstract class AbstractSequentialFile implements SequentialFile {
       this.file = new File(directory, file);
       this.directory = directory;
       this.factory = factory;
-      this.writerExecutor = writerExecutor;
    }
 
    // Public --------------------------------------------------------
@@ -117,6 +110,8 @@ public abstract class AbstractSequentialFile implements SequentialFile {
          FileIOUtil.copyData(this, newFileName, buffer);
          newFileName.close();
          this.close();
+      } catch (ClosedChannelException e) {
+         throw e;
       } catch (IOException e) {
          factory.onIOError(new ActiveMQIOErrorException(e.getMessage(), e), e.getMessage(), this);
          throw e;
@@ -140,6 +135,8 @@ public abstract class AbstractSequentialFile implements SequentialFile {
    public final void renameTo(final String newFileName) throws IOException, InterruptedException, ActiveMQException {
       try {
          close();
+      } catch (ClosedChannelException e) {
+         throw e;
       } catch (IOException e) {
          factory.onIOError(new ActiveMQIOErrorException(e.getMessage(), e), e.getMessage(), this);
          throw e;
@@ -161,20 +158,6 @@ public abstract class AbstractSequentialFile implements SequentialFile {
     */
    @Override
    public synchronized void close() throws IOException, InterruptedException, ActiveMQException {
-      final CountDownLatch donelatch = new CountDownLatch(1);
-
-      if (writerExecutor != null) {
-         writerExecutor.execute(new Runnable() {
-            @Override
-            public void run() {
-               donelatch.countDown();
-            }
-         });
-
-         while (!donelatch.await(60, TimeUnit.SECONDS)) {
-            ActiveMQJournalLogger.LOGGER.couldNotCompleteTask(new Exception("trace"), file.getName());
-         }
-      }
    }
 
    @Override

@@ -58,6 +58,8 @@ import org.apache.activemq.artemis.jlibaio.LibaioContext;
 import org.apache.activemq.artemis.spi.core.security.ActiveMQJAASSecurityManager;
 import org.apache.activemq.artemis.spi.core.security.jaas.InVMLoginModule;
 import org.apache.activemq.artemis.tests.integration.IntegrationTestLogger;
+import org.apache.activemq.artemis.tests.integration.mqtt.imported.util.Wait;
+import org.apache.activemq.artemis.tests.unit.core.config.impl.fakes.FakeConnectorServiceFactory;
 import org.apache.activemq.artemis.utils.RandomUtil;
 import org.apache.activemq.artemis.utils.UUIDGenerator;
 import org.junit.Assert;
@@ -264,12 +266,18 @@ public class ActiveMQServerControlTest extends ManagementTestBase {
       ServerLocator receiveLocator = createInVMNonHALocator();
       ClientSessionFactory receiveCsf = createSessionFactory(receiveLocator);
       ClientSession receiveClientSession = receiveCsf.createSession(true, false, false);
-      ClientConsumer consumer = receiveClientSession.createConsumer(name);
+      final ClientConsumer consumer = receiveClientSession.createConsumer(name);
 
       Assert.assertFalse(consumer.isClosed());
 
       checkResource(ObjectNameBuilder.DEFAULT.getQueueObjectName(address, name));
       serverControl.destroyQueue(name.toString(), true);
+      Wait.waitFor(new Wait.Condition() {
+         @Override
+         public boolean isSatisified() throws Exception {
+            return consumer.isClosed();
+         }
+      }, 1000, 100);
       Assert.assertTrue(consumer.isClosed());
 
       checkNoResource(ObjectNameBuilder.DEFAULT.getQueueObjectName(address, name));
@@ -414,13 +422,10 @@ public class ActiveMQServerControlTest extends ManagementTestBase {
       } catch (Exception e) {
       }
 
-      try {
-         serverControl.setMessageCounterSamplePeriod(MessageCounterManagerImpl.MIN_SAMPLE_PERIOD - 1);
-         Assert.fail();
-      } catch (Exception e) {
-      }
+      //this only gets warning now and won't cause exception.
+      serverControl.setMessageCounterSamplePeriod(MessageCounterManagerImpl.MIN_SAMPLE_PERIOD - 1);
 
-      Assert.assertEquals(newSample, serverControl.getMessageCounterSamplePeriod());
+      Assert.assertEquals(MessageCounterManagerImpl.MIN_SAMPLE_PERIOD - 1, serverControl.getMessageCounterSamplePeriod());
    }
 
    protected void restartServer() throws Exception {
@@ -1328,6 +1333,21 @@ public class ActiveMQServerControlTest extends ManagementTestBase {
       Assert.assertEquals("myUser", second.getString("principal"));
       Assert.assertTrue(second.getJsonNumber("creationTime").longValue() > 0);
       Assert.assertEquals(1, second.getJsonNumber("consumerCount").longValue());
+   }
+
+   @Test
+   public void testConnectorServiceManagement() throws Exception {
+      ActiveMQServerControl managementControl = createManagementControl();
+      managementControl.createConnectorService("myconn", FakeConnectorServiceFactory.class.getCanonicalName(), new HashMap<String, Object>());
+
+      Assert.assertEquals(1, server.getConnectorsService().getConnectors().size());
+
+      managementControl.createConnectorService("myconn2", FakeConnectorServiceFactory.class.getCanonicalName(), new HashMap<String, Object>());
+      Assert.assertEquals(2, server.getConnectorsService().getConnectors().size());
+
+      managementControl.destroyConnectorService("myconn");
+      Assert.assertEquals(1, server.getConnectorsService().getConnectors().size());
+      Assert.assertEquals("myconn2", managementControl.getConnectorServices()[0]);
    }
 
    protected void scaleDown(ScaleDownHandler handler) throws Exception {

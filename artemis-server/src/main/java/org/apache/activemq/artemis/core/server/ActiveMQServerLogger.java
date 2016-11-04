@@ -347,10 +347,6 @@ public interface ActiveMQServerLogger extends BasicLogger {
    void timedOutStoppingThreadpool(ExecutorService service);
 
    @LogMessage(level = Logger.Level.WARN)
-   @Message(id = 222003, value = "Must specify a name for each divert. This one will not be deployed.", format = Message.Format.MESSAGE_FORMAT)
-   void divertWithNoName();
-
-   @LogMessage(level = Logger.Level.WARN)
    @Message(id = 222004, value = "Must specify an address for each divert. This one will not be deployed.", format = Message.Format.MESSAGE_FORMAT)
    void divertWithNoAddress();
 
@@ -960,9 +956,9 @@ public interface ActiveMQServerLogger extends BasicLogger {
    void messageExceededMaxDeliverySendtoDLA(MessageReference ref, SimpleString name, SimpleString simpleString);
 
    @LogMessage(level = Logger.Level.WARN)
-   @Message(id = 222150, value = "Message has exceeded max delivery attempts. No Dead Letter Address configured for queue {0} so dropping it",
+   @Message(id = 222150, value = "Message {0} has exceeded max delivery attempts. No Dead Letter Address configured for queue {1} so dropping it",
       format = Message.Format.MESSAGE_FORMAT)
-   void messageExceededMaxDeliveryNoDLA(SimpleString name);
+   void messageExceededMaxDeliveryNoDLA(MessageReference ref, SimpleString name);
 
    @LogMessage(level = Logger.Level.WARN)
    @Message(id = 222151, value = "removing consumer which did not handle a message, consumer={0}, message={1}",
@@ -1027,6 +1023,16 @@ public interface ActiveMQServerLogger extends BasicLogger {
    @LogMessage(level = Logger.Level.WARN)
    @Message(id = 222164, value = "Error when trying to start replication {0}", format = Message.Format.MESSAGE_FORMAT)
    void errorStartingReplication(BackupReplicationStartFailedMessage.BackupRegistrationProblem problem);
+
+   @LogMessage(level = Logger.Level.WARN)
+   @Message(id = 222165, value = "No Dead Letter Address configured for queue {0} in AddressSettings",
+      format = Message.Format.MESSAGE_FORMAT)
+   void AddressSettingsNoDLA(SimpleString name);
+
+   @LogMessage(level = Logger.Level.WARN)
+   @Message(id = 222166, value = "No Expiry Address configured for queue {0} in AddressSettings",
+      format = Message.Format.MESSAGE_FORMAT)
+   void AddressSettingsNoExpiryAddress(SimpleString name);
 
    @LogMessage(level = Logger.Level.WARN)
    @Message(id = 222167, value = "Group Binding not available so deleting {0} groups from {1}, groups will be bound to another node",
@@ -1520,4 +1526,9 @@ public interface ActiveMQServerLogger extends BasicLogger {
    @LogMessage(level = Logger.Level.ERROR)
    @Message(id = 224069, value = "Change detected in broker configuration file, but reload failed", format = Message.Format.MESSAGE_FORMAT)
    void configurationReloadFailed(@Cause Throwable t);
+
+   @LogMessage(level = Logger.Level.WARN)
+   @Message(id = 224072, value = "Message Counter Sample Period too short: {0}", format = Message.Format.MESSAGE_FORMAT)
+   void invalidMessageCounterPeriod(long value);
+
 }

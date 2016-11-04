@@ -32,8 +32,6 @@ public class EmbeddedRestActiveMQJMS extends EmbeddedRestActiveMQ {
    }
 
    public BindingRegistry getRegistry() {
-      if (embeddedActiveMQ == null)
-         return null;
       return ((EmbeddedJMS) embeddedActiveMQ).getRegistry();
    }
 

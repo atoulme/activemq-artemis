@@ -195,7 +195,7 @@ public interface Queue extends Bindable {
     */
    LinkedListIterator<MessageReference> iterator();
 
-   LinkedListIterator<MessageReference> totalIterator();
+   LinkedListIterator<MessageReference> browserIterator();
 
    SimpleString getExpiryAddress();
 
@@ -205,6 +205,15 @@ public interface Queue extends Bindable {
     * To check if a queue is paused, invoke <i>isPaused()</i>
     */
    void pause();
+
+   /**
+    * Pauses the queue. It will receive messages but won't give them to the consumers until resumed.
+    * If a queue is paused, pausing it again will only throw a warning.
+    * To check if a queue is paused, invoke <i>isPaused()</i>
+    */
+   void pause(boolean persist);
+
+   void reloadPause(long recordID);
 
    /**
     * Resumes the delivery of message for the queue.
@@ -217,6 +226,12 @@ public interface Queue extends Bindable {
     * @return true if paused, false otherwise.
     */
    boolean isPaused();
+
+   /**
+    * if the pause was persisted
+    * @return
+    */
+   boolean isPersistedPause();
 
    Executor getExecutor();
 

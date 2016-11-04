@@ -36,6 +36,10 @@ public interface ServiceRegistry {
 
    void setExecutorService(ExecutorService executorService);
 
+   ExecutorService getIOExecutorService();
+
+   void setIOExecutorService(ExecutorService ioExecutorService);
+
    ScheduledExecutorService getScheduledExecutorService();
 
    void setScheduledExecutorService(ScheduledExecutorService scheduledExecutorService);
@@ -53,6 +57,14 @@ public interface ServiceRegistry {
     * @return
     */
    Collection<Pair<ConnectorServiceFactory, ConnectorServiceConfiguration>> getConnectorServices(List<ConnectorServiceConfiguration> configs);
+
+   /**
+    * Get connector service for a given configuration.
+    *
+    * @param configuration The connector service configuration.
+    * @return an instance of the connector service factory.
+    */
+   ConnectorServiceFactory getConnectorService(ConnectorServiceConfiguration configuration);
 
    void addIncomingInterceptor(BaseInterceptor interceptor);
 

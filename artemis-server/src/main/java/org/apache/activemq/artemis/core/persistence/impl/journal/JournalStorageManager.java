@@ -26,6 +26,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -85,25 +86,28 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
 
    public JournalStorageManager(final Configuration config,
                                 final ExecutorFactory executorFactory,
-                                final ScheduledExecutorService scheduledExecutorService) {
-      this(config, executorFactory, scheduledExecutorService, null);
+                                final ScheduledExecutorService scheduledExecutorService,
+                                final ExecutorFactory ioExecutors) {
+      this(config, executorFactory, scheduledExecutorService, ioExecutors, null);
    }
 
-   public JournalStorageManager(final Configuration config, final ExecutorFactory executorFactory) {
-      this(config, executorFactory, null, null);
+   public JournalStorageManager(final Configuration config, final ExecutorFactory executorFactory, final ExecutorFactory ioExecutors) {
+      this(config, executorFactory, null, ioExecutors, null);
    }
 
    public JournalStorageManager(final Configuration config,
                                 final ExecutorFactory executorFactory,
                                 final ScheduledExecutorService scheduledExecutorService,
+                                final ExecutorFactory ioExecutors,
                                 final IOCriticalErrorListener criticalErrorListener) {
-      super(config, executorFactory, scheduledExecutorService, criticalErrorListener);
+      super(config, executorFactory, scheduledExecutorService, ioExecutors, criticalErrorListener);
    }
 
    public JournalStorageManager(final Configuration config,
                                 final ExecutorFactory executorFactory,
+                                final ExecutorFactory ioExecutors,
                                 final IOCriticalErrorListener criticalErrorListener) {
-      super(config, executorFactory, null, criticalErrorListener);
+      super(config, executorFactory, null, ioExecutors, criticalErrorListener);
    }
 
    @Override
@@ -114,8 +118,9 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
       }
 
       bindingsFF = new NIOSequentialFileFactory(config.getBindingsLocation(), criticalErrorListener, config.getJournalMaxIO_NIO());
+      bindingsFF.setDatasync(config.isJournalDatasync());
 
-      Journal localBindings = new JournalImpl(1024 * 1024, 2, config.getJournalCompactMinFiles(), config.getJournalPoolFiles(), config.getJournalCompactPercentage(), bindingsFF, "activemq-bindings", "bindings", 1);
+      Journal localBindings = new JournalImpl(ioExecutors, 1024 * 1024, 2, config.getJournalCompactMinFiles(), config.getJournalPoolFiles(), config.getJournalCompactPercentage(), bindingsFF, "activemq-bindings", "bindings", 1, 0);
 
       bindingsJournal = localBindings;
       originalBindingsJournal = localBindings;
@@ -131,7 +136,11 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
          throw ActiveMQMessageBundle.BUNDLE.invalidJournalType2(config.getJournalType());
       }
 
-      Journal localMessage = new JournalImpl(config.getJournalFileSize(), config.getJournalMinFiles(), config.getJournalPoolFiles(), config.getJournalCompactMinFiles(), config.getJournalCompactPercentage(), journalFF, "activemq-data", "amq", config.getJournalType() == JournalType.ASYNCIO ? config.getJournalMaxIO_AIO() : config.getJournalMaxIO_NIO());
+      journalFF.setDatasync(config.isJournalDatasync());
+
+
+      Journal localMessage = new JournalImpl(ioExecutors, config.getJournalFileSize(), config.getJournalMinFiles(), config.getJournalPoolFiles(), config.getJournalCompactMinFiles(), config.getJournalCompactPercentage(), journalFF, "activemq-data", "amq", config.getJournalType() == JournalType.ASYNCIO ? config.getJournalMaxIO_AIO() : config.getJournalMaxIO_NIO(), 0);
+
       messageJournal = localMessage;
       originalMessageJournal = localMessage;
 
@@ -197,14 +206,18 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
       }
 
       final CountDownLatch latch = new CountDownLatch(1);
-      executor.execute(new Runnable() {
-         @Override
-         public void run() {
-            latch.countDown();
-         }
-      });
+      try {
+         executor.execute(new Runnable() {
+            @Override
+            public void run() {
+               latch.countDown();
+            }
+         });
 
-      latch.await(30, TimeUnit.SECONDS);
+         latch.await(30, TimeUnit.SECONDS);
+      } catch (RejectedExecutionException ignored) {
+         // that's ok
+      }
 
       // We cache the variable as the replicator could be changed between here and the time we call stop
       // since sendLiveIsStopping may issue a close back from the channel
@@ -224,8 +237,6 @@ public class JournalStorageManager extends AbstractJournalStorageManager {
       bindingsJournal.stop();
 
       messageJournal.stop();
-
-      singleThreadExecutor.shutdown();
 
       journalLoaded = false;
 

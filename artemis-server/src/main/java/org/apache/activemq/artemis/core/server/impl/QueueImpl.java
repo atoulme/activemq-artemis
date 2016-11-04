@@ -51,6 +51,7 @@ import org.apache.activemq.artemis.core.io.IOCallback;
 import org.apache.activemq.artemis.core.message.impl.MessageImpl;
 import org.apache.activemq.artemis.core.paging.cursor.PageSubscription;
 import org.apache.activemq.artemis.core.paging.cursor.PagedReference;
+import org.apache.activemq.artemis.core.persistence.QueueStatus;
 import org.apache.activemq.artemis.core.persistence.StorageManager;
 import org.apache.activemq.artemis.core.postoffice.Binding;
 import org.apache.activemq.artemis.core.postoffice.Bindings;
@@ -175,6 +176,8 @@ public class QueueImpl implements Queue {
    protected final AtomicInteger deliveringCount = new AtomicInteger(0);
 
    private boolean paused;
+
+   private long pauseStatusRecord = -1;
 
    private static final int MAX_SCHEDULED_RUNNERS = 2;
 
@@ -518,7 +521,9 @@ public class QueueImpl implements Queue {
 
       directDeliver = false;
 
-      messagesAdded++;
+      if (!ref.isPaged()) {
+         messagesAdded++;
+      }
    }
 
    @Override
@@ -573,7 +578,9 @@ public class QueueImpl implements Queue {
    protected boolean scheduleIfPossible(MessageReference ref) {
       if (scheduledDeliveryHandler.checkAndSchedule(ref, true)) {
          synchronized (this) {
-            messagesAdded++;
+            if (!ref.isPaged()) {
+               messagesAdded++;
+            }
          }
 
          return true;
@@ -768,11 +775,7 @@ public class QueueImpl implements Queue {
 
    @Override
    public synchronized void addRedistributor(final long delay) {
-      if (redistributorFuture != null) {
-         redistributorFuture.cancel(false);
-
-         futures.remove(redistributorFuture);
-      }
+      clearRedistributorFuture();
 
       if (redistributor != null) {
          // Just prompt delivery
@@ -792,6 +795,16 @@ public class QueueImpl implements Queue {
       }
    }
 
+   private void clearRedistributorFuture() {
+      ScheduledFuture<?> future = redistributorFuture;
+      redistributorFuture = null;
+      if (future != null) {
+         future.cancel(false);
+
+         futures.remove(future);
+      }
+   }
+
    @Override
    public synchronized void cancelRedistributor() throws Exception {
       if (redistributor != null) {
@@ -802,11 +815,7 @@ public class QueueImpl implements Queue {
          removeConsumer(redistributorToRemove);
       }
 
-      if (redistributorFuture != null) {
-         redistributorFuture.cancel(false);
-
-         redistributorFuture = null;
-      }
+      clearRedistributorFuture();
    }
 
    @Override
@@ -858,8 +867,8 @@ public class QueueImpl implements Queue {
    }
 
    @Override
-   public TotalQueueIterator totalIterator() {
-      return new TotalQueueIterator();
+   public QueueBrowserIterator browserIterator() {
+      return new QueueBrowserIterator();
    }
 
    @Override
@@ -1163,7 +1172,7 @@ public class QueueImpl implements Queue {
    @Override
    public long getMessagesAdded() {
       if (pageSubscription != null) {
-         return messagesAdded + pageSubscription.getCounter().getValue() - pagedReferences.get();
+         return messagesAdded + pageSubscription.getCounter().getValueAdded();
       } else {
          return messagesAdded;
       }
@@ -1712,8 +1721,32 @@ public class QueueImpl implements Queue {
 
    @Override
    public synchronized void pause() {
+      pause(false);
+   }
+
+   @Override
+   public synchronized void reloadPause(long recordID) {
+      this.paused = true;
+      if (pauseStatusRecord >= 0) {
+         try {
+            storageManager.deleteQueueStatus(pauseStatusRecord);
+         } catch (Exception e) {
+            logger.warn(e.getMessage(), e);
+         }
+      }
+      this.pauseStatusRecord = recordID;
+   }
+
+   @Override
+   public synchronized void pause(boolean persist)  {
       try {
          this.flushDeliveriesInTransit();
+         if (persist && isDurable()) {
+            if (pauseStatusRecord >= 0) {
+               storageManager.deleteQueueStatus(pauseStatusRecord);
+            }
+            pauseStatusRecord = storageManager.storeQueueStatus(this.id, QueueStatus.PAUSED);
+         }
       } catch (Exception e) {
          ActiveMQServerLogger.LOGGER.warn(e.getMessage(), e);
       }
@@ -1724,12 +1757,26 @@ public class QueueImpl implements Queue {
    public synchronized void resume() {
       paused = false;
 
+      if (pauseStatusRecord >= 0) {
+         try {
+            storageManager.deleteQueueStatus(pauseStatusRecord);
+         } catch (Exception e) {
+            ActiveMQServerLogger.LOGGER.warn(e.getMessage(), e);
+         }
+         pauseStatusRecord = -1;
+      }
+
       deliverAsync();
    }
 
    @Override
    public synchronized boolean isPaused() {
       return paused;
+   }
+
+   @Override
+   public synchronized boolean isPersistedPause() {
+      return this.pauseStatusRecord >= 0;
    }
 
    @Override
@@ -1817,7 +1864,10 @@ public class QueueImpl implements Queue {
       while ((ref = intermediateMessageReferences.poll()) != null) {
          internalAddTail(ref);
 
-         messagesAdded++;
+         if (!ref.isPaged()) {
+            messagesAdded++;
+         }
+
          if (added++ > MAX_DELIVERIES_IN_LOOP) {
             // if we just keep polling from the intermediate we could starve in case there's a sustained load
             deliverAsync();
@@ -2395,7 +2445,7 @@ public class QueueImpl implements Queue {
             move(tx, deadLetterAddress, ref, false, AckReason.KILLED);
          }
       } else {
-         ActiveMQServerLogger.LOGGER.messageExceededMaxDeliveryNoDLA(name);
+         ActiveMQServerLogger.LOGGER.messageExceededMaxDeliveryNoDLA(ref, name);
 
          ref.acknowledge(tx, AckReason.KILLED);
       }
@@ -2709,7 +2759,7 @@ public class QueueImpl implements Queue {
          synchronized (QueueImpl.this) {
             internalAddRedistributor(executor1);
 
-            futures.remove(this);
+            clearRedistributorFuture();
          }
       }
    }
@@ -2813,17 +2863,23 @@ public class QueueImpl implements Queue {
 
    //Readonly (no remove) iterator over the messages in the queue, in order of
    //paging store, intermediateMessageReferences and MessageReferences
-   private class TotalQueueIterator implements LinkedListIterator<MessageReference> {
+   private class QueueBrowserIterator implements LinkedListIterator<MessageReference> {
 
-      LinkedListIterator<PagedReference> pageIter = null;
+      LinkedListIterator<PagedReference> pagingIterator = null;
       LinkedListIterator<MessageReference> messagesIterator = null;
+
+      private LinkedListIterator<PagedReference> getPagingIterator() {
+         if (pagingIterator == null) {
+            pagingIterator = pageSubscription.iterator(true);
+         }
+         return pagingIterator;
+      }
 
       Iterator lastIterator = null;
 
-      private TotalQueueIterator() {
-         if (pageSubscription != null) {
-            pageIter = pageSubscription.iterator();
-         }
+      MessageReference cachedNext = null;
+
+      private QueueBrowserIterator() {
          messagesIterator = new SynchronizedIterator(messageReferences.iterator());
       }
 
@@ -2833,9 +2889,9 @@ public class QueueImpl implements Queue {
             lastIterator = messagesIterator;
             return true;
          }
-         if (pageIter != null) {
-            if (pageIter.hasNext()) {
-               lastIterator = pageIter;
+         if (getPagingIterator() != null) {
+            if (getPagingIterator().hasNext()) {
+               lastIterator = getPagingIterator();
                return true;
             }
          }
@@ -2843,16 +2899,32 @@ public class QueueImpl implements Queue {
          return false;
       }
 
+
+
       @Override
       public MessageReference next() {
-         if (messagesIterator != null && messagesIterator.hasNext()) {
-            MessageReference msg = messagesIterator.next();
-            return msg;
+
+         if (cachedNext != null) {
+            try {
+               return cachedNext;
+            } finally {
+               cachedNext = null;
+            }
+
          }
-         if (pageIter != null) {
-            if (pageIter.hasNext()) {
-               lastIterator = pageIter;
-               return pageIter.next();
+         while (true) {
+            if (messagesIterator != null && messagesIterator.hasNext()) {
+               MessageReference msg = messagesIterator.next();
+               return msg;
+            } else {
+               break;
+            }
+         }
+         if (getPagingIterator() != null) {
+            if (getPagingIterator().hasNext()) {
+               lastIterator = getPagingIterator();
+               MessageReference ref = getPagingIterator().next();
+               return ref;
             }
          }
 
@@ -2872,8 +2944,8 @@ public class QueueImpl implements Queue {
 
       @Override
       public void close() {
-         if (pageIter != null) {
-            pageIter.close();
+         if (getPagingIterator() != null) {
+            getPagingIterator().close();
          }
          if (messagesIterator != null) {
             messagesIterator.close();
@@ -2939,7 +3011,17 @@ public class QueueImpl implements Queue {
       public void onChange() {
          AddressSettings settings = addressSettingsRepository.getMatch(address.toString());
          configureExpiry(settings);
+         checkDeadLetterAddressAndExpiryAddress(settings);
          configureSlowConsumerReaper(settings);
+      }
+   }
+
+   private void checkDeadLetterAddressAndExpiryAddress(final AddressSettings settings) {
+      if (settings.getDeadLetterAddress() == null) {
+         ActiveMQServerLogger.LOGGER.AddressSettingsNoDLA(name);
+      }
+      if (settings.getExpiryAddress() == null) {
+         ActiveMQServerLogger.LOGGER.AddressSettingsNoExpiryAddress(name);
       }
    }
 
